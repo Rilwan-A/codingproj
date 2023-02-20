@@ -1,0 +1,8 @@
+dataset     | seq_len   | input | output    | data shape               | train length   | val length
+ptbxl 248   | 248       | 12    | 12        |   (D, c, seq)             | 69764         | 8772
+MuJoCo      | 100       | 14    | 14        |   (D, c, seq)
+Electricity | 100       | 370   | 370       |   (c1, D, seq, c2) | transformed to (D seq c)
+PEMS-Bay    |           |       |           |
+Solar       |           |       |           |
+ptbxl 1000  | 1000      | 12    | 12        |   (D, c, seq)    
+EETm1       | 1056      | 7     | 7         |   (D, seq, c)

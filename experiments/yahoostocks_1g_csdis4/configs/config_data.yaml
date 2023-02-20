@@ -1,0 +1,14 @@
+batch_size: 8
+batch_size_val: 8
+dir_data: ./datasets/yahoo_data/
+end_prop_test: 1.0
+end_prop_train: 0.6
+end_prop_val: 0.8
+shuffle_buffer_prop: 0.99
+start_prop_test: 0.8
+start_prop_train: 0.0
+start_prop_val: 0.6
+test_set_method: holidays_only
+window_sample_count: 3
+window_shift: 1
+window_size: 10

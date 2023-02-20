@@ -1,0 +1,7 @@
+**__pycache__
+**npy
+**temp
+**launch
+*.hdf5
+*.v2
+*.pkl

@@ -1,0 +1,23 @@
+bidirectional: true
+conv_channels_first: true
+d_model: 128
+diffusion_step_embed_dim_in: 128
+diffusion_step_embed_dim_mid: 512
+diffusion_step_embed_dim_out: 512
+dropout: 0.0
+expand: 2
+ff: 2
+glu: true
+in_channels: 12
+label_embed_classes: 71
+label_embed_dim: 128
+n_layers: 6
+out_channels: 12
+pool:
+- 2
+- 2
+s4_bidirectional: true
+s4_d_state: 64
+s4_dropout: 0.0
+s4_lmax: 100
+unet: true
