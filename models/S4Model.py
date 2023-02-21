@@ -1126,52 +1126,6 @@ def get_initializer(name, activation=None):
     
     return initializer
 
-class TransposedLinear(ls.Layer):
-    """ Linear module on the second-to-last dimension """
-
-    def __init__(self, d_input, d_output, bias=True, zero_bias_init=False):
-        
-        super().__init__()
-
-        self._b = bias
-        self.zero_bias_init = zero_bias_init       
-        # Issue in original paper
-            #NOTE: pytorch default implementation of kaiming_uniform (https://pytorch.org/docs/stable/nn.init.html)
-            # uses a default of 'leaky_relu' to calculate the gain. Under this default 
-            # params setting used in pytorch the He defaults to a U[ -sqrt(1/fan_in), +sqrt(1/fan_in)]
-            
-            # default tensorflow implementation for HeNormal uses U[-sqrt(6/fan_in),+sqrt(6/fan_in)]
-            # as per https://github.com/pytorch/pytorch/issues/57109#issuecomment-1310430244
-        #TODO: Check if this issue below applies to all parts where you have used HeUniform
-
-        self.kernel = pytorch_he_uniform_init(d_input, p=math.sqrt(5))((d_output, d_input)) 
-        
-
-        if self._b:
-            if self.zero_bias_init:
-                self.bias = tf.keras.initializers.Zeros()((d_output, 1))
-            else:
-                self.bias = pytorch_he_uniform_init(d_input, p=math.sqrt(5))((d_output, 1)) 
-        else:
-            self.bias = tf.constant(0.0)
-        
-    def build(self, input_shape):
-
-        self.kernel = tf.Variable(self.kernel, name='kernel')
-
-        if self._b:
-            self.bias = tf.Variable(self.bias, name='bias')
-
-        
-        super(TransposedLinear, self).build(input_shape)
-        self.built = True
-    
-    @tf.function(
-        reduce_retracing=True,
-        jit_compile=True)
-    def call(self, x):
-        return tf.einsum('... u l, v u -> ... v l', x, self.kernel) + self.bias
-
 def LinearActivation(
         d_input, d_output, bias=True,
         zero_bias_init=False,
@@ -1185,16 +1139,9 @@ def LinearActivation(
     """ Returns a linear nn.Module with control over axes order, initialization, and activation """
 
     # Construct core module
-    # linear_cls = TransposedLinear if transposed else ls.Dense
     if activation == 'glu': 
         d_output *= 2
-    # Transposed Linear causing pickling errors
-    # linear = TransposedLinear( d_input=d_input, d_output=d_output, bias=bias, 
-    #                             zero_bias_init=zero_bias_init,
-    #                             **kwargs) if transposed else \
-    #                 ls.Dense(d_output, use_bias=bias, bias_initializer='zeros' if zero_bias_init else None)
-                    
-                    
+                                    
     linear = ls.Dense(d_output, use_bias=bias, bias_initializer='zeros' if zero_bias_init else None)
 
     # Weight norm
@@ -1206,7 +1153,6 @@ def LinearActivation(
     
     if activate and activation is not None:
         activation = Activation(activation, axis=-2 if transposed==True else -1)
-        # linear = nn.Sequential(linear, activation)
         linear = ks.Sequential([linear, activation])
 
     return linear

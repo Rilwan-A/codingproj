@@ -9,7 +9,7 @@ from argparse import ArgumentParser
 import tensorflow as tf
 
 tf.get_logger().setLevel('ERROR')
-tf.config.run_functions_eagerly(True)
+# tf.config.run_functions_eagerly(True)
 physical_devices = tf.config.list_physical_devices('GPU')
 try:
     tf.config.experimental.set_memory_growth(physical_devices[0], True)
@@ -162,16 +162,18 @@ class ImputationTrainer(tf.keras.Model):
         
         elif type(batch) == dict:
             audio = batch['data']
-            observed_mask = batch.get('observed_mask', tf.ones_like(audio))
-            cond_mask = batch.get('cond_mask', None)
-            loss_mask = batch.get('loss_mask', None)
-            target = batch.get('target', None)
+            observed_mask = batch.pop('observed_mask', tf.ones_like(audio))
+            cond_mask = batch.pop('cond_mask', None)
+            loss_mask = batch.pop('loss_mask', None)
+            # target_return = batch.pop('target_return', None)
+            # target_price = batch.pop('target_price', None)
+            other = batch
                         
-        return audio, observed_mask, cond_mask, loss_mask, target
+        return audio, observed_mask, cond_mask, loss_mask, other
     
     def step(self, batch, eval_all_timesteps=False, step_name='val'):
         
-        audio, observed_mask, cond_mask, loss_mask, target = self.unpack_batch(batch)
+        audio, observed_mask, cond_mask, loss_mask, other = self.unpack_batch(batch)
                 
         cond_mask = cond_mask if (cond_mask is not None) else self.diffusion.get_cond_mask(audio.shape, 
                         self.diffusion.mask_method,
@@ -270,7 +272,7 @@ class ImputationTrainer(tf.keras.Model):
             len_ = batch.pop('len', None)
             exchange_index = batch.pop('exchange_index', None)
         
-        audio, observed_mask, cond_mask, loss_mask, target = self.unpack_batch(batch)
+        audio, observed_mask, cond_mask, loss_mask, other = self.unpack_batch(batch)
                          
         cond_mask = cond_mask if (cond_mask is not None) else self.diffusion.get_cond_mask(audio.shape, 
                                         self.diffusion.mask_method, 
@@ -292,8 +294,6 @@ class ImputationTrainer(tf.keras.Model):
             pred_samples=self.pred_samples
         ) # (bs, pred_samples, d, seq )
         
-        
-    
         # Creating expanded versions to match m samples per prediction
         generated_audio = tf.transpose( generated_audio, (0,2,3,1) ) #(bs, d, seq, pred_sample)
         audio_expanded = tf.broadcast_to( audio[..., tf.newaxis], generated_audio.shape ) 
@@ -313,21 +313,20 @@ class ImputationTrainer(tf.keras.Model):
         for k in self.map_mname_predmetric:
             
             if getattr(self.map_mname_predmetric[k], 'update_state_non_masked_input', False ):
-                self.map_mname_predmetric[k].update_state(audio, generated_audio, loss_mask_expanded, target=target, scaler=self.scaler )
+                self.map_mname_predmetric[k].update_state(audio, generated_audio, loss_mask_expanded, scaler=self.scaler, **other )
             else:
                 audio_expanded_masked = tf.boolean_mask(audio_expanded, loss_mask_expanded )
                 generated_audio_masked = tf.boolean_mask(generated_audio, loss_mask_expanded )
         
                 self.map_mname_predmetric[k].update_state( audio_expanded_masked, generated_audio_masked )
 
-        # preparing output params
-        outp = {   
-                        'cond_mask':cond_mask,
-                        'loss_mask':loss_mask,
-                        'target':target,
-                        'audio':audio,
-                        'generated_audio':generated_audio
-                        }
+        # Preparing output params
+        outp = {'cond_mask':cond_mask,
+                'loss_mask':loss_mask,
+                'target':other.get('target', None),
+                'audio':audio,
+                'generated_audio':generated_audio
+                }
         
         outp = {k:v for k,v in outp.items() if v is not None}
 
@@ -340,7 +339,6 @@ class ImputationTrainer(tf.keras.Model):
         # or at the start of `evaluate()`.
         # If you don't implement this property, you have to call
         # `reset_states()` yourself at the time of your choosing.
-
         return [self.train_loss_tracker, self.val_loss_tracker, *self.map_mname_trainmetric.values(), *self.map_mname_valmetric.values(), *self.map_mname_predmetric.values() ]
     
     def compile(self, optimizer, mixed_precision, **kwargs):
@@ -435,8 +433,8 @@ class ImputationTrainer(tf.keras.Model):
         trainer = ImputationTrainer( model=model, diffusion=diffusion, **vars(config_trainer) )
         
         #Optimizer Setup        
-        boundaries = [config_trainer.steps_per_epoch//4, config_trainer.steps_per_epoch, 3*config_trainer.steps_per_epoch]
-        values = [ 1*config_trainer.learning_rate, 1.0*config_trainer.learning_rate, 1.125*config_trainer.learning_rate , 1.0*config_trainer.learning_rate]
+        boundaries = [config_trainer.steps_per_epoch ]
+        values = [ 1*config_trainer.learning_rate, 1*config_trainer.learning_rate]
 
         schedule = tf.keras.optimizers.schedules.PiecewiseConstantDecay(boundaries, values)
         warmup = WarmUp( config_trainer.learning_rate, schedule, config_trainer.steps_per_epoch) # config_trainer.steps_per_epoch//10 )     
@@ -465,9 +463,9 @@ class ImputationTrainer(tf.keras.Model):
             
             workers=config_trainer.workers ,
             epochs= config_trainer.epochs ,
-            steps_per_epoch= config_trainer.steps_per_epoch, #iters_per_ckpt #steps per epoch requires dataset obect to use .repeat()
+            steps_per_epoch= config_trainer.steps_per_epoch,
             
-            validation_steps = config_trainer.validation_steps, # 20 if config_trainer.debugging else config_trainer.validation_steps,
+            validation_steps = config_trainer.validation_steps, 
             callbacks=callbacks,
             verbose=0,
             use_multiprocessing=True
@@ -530,9 +528,11 @@ class ImputationTrainer(tf.keras.Model):
         dict_outp = trainer.predict(
             dset_test,
             workers=config_trainer.workers,
-            steps = 3 if config_trainer.debugging else None,
-            # use_multiprocessing=False,
-            callbacks = callbacks ) #{ 'cond_mask': , 'batch':, 'generated_audio':}
+            # steps = 1 if config_trainer.debugging else None, 
+            steps = 10, 
+            callbacks = callbacks)      
+            # use_multiprocessing=False
+            # { 'cond_mask': , 'batch':, 'generated_audio':}
 
         # TODO: Saving Outputs to File    
         with open( os.path.join(dir_outp,'pred_outp.pkl') , 'wb' ) as f:

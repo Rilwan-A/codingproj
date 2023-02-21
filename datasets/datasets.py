@@ -120,6 +120,7 @@ class DsetYahooStocks():
             data = data[ data.index >= s_date]
         
         #Apply log return transformation to price data
+        data_price = copy.deepcopy(data[1:])
         data = self.log_return_transform(data)
         
         try:
@@ -139,7 +140,7 @@ class DsetYahooStocks():
                                         
         dict_data = {
             'data':data_std.fillna(0.0).values,
-            'target':data.values,
+            'target_price':data_price.values,
             # 'mask_holiday':mask_holiday,
             # 'mask_pre_record':mask_pre_record
             'observed_mask':np.logical_and(~mask_holiday, ~tf.cast(mask_pre_record, dtype=tf.bool)),
@@ -419,7 +420,7 @@ class DsetYahooStocks():
                 trainwindowinfo['li_loss_mask'] = [ lm.values for lm in li_loss_mask]
                 trainwindowinfo['li_cond_mask'] = [ (1-mask.values) for mask in li_loss_mask]
                 trainwindowinfo['li_observed_mask'] =  [ ~data.isna() for data in li_windows]
-                trainwindowinfo['li_target'] =  [ r.values for r in li_return_over_holiday]
+                trainwindowinfo['li_target_return'] =  [ r.values for r in li_return_over_holiday]
                 
                 del trainwindowinfo['s_idx']
                 del trainwindowinfo['len']
@@ -450,7 +451,7 @@ class DsetYahooStocks():
         dict_input = {k: np.stack( [li_trainingwindowinfo[idx][k] for idx in range(l) ] ) for k in keys  }
         
         # Transposing relevant inputs
-        keys_to_transpose = ['data','loss_mask','cond_mask','observed_mask','target']
+        keys_to_transpose = ['data','loss_mask','cond_mask','observed_mask','target_return']
         for k in keys_to_transpose:
             dict_input[k] = np.transpose(dict_input[k], (0,2,1))
 
@@ -572,7 +573,7 @@ class DsetYahooStocksMaxMin(DsetYahooStocks):
                              
         dict_data = {
             'data':data_std.fillna(0.0).values,
-            'target':data.values,
+            'target_price':data.values,
             'observed_mask':np.logical_and(~mask_holiday, ~tf.cast(mask_pre_record, dtype=tf.bool)),
             'idx_hilo_hang_seng_stock': [[ idx for idx, col in enumerate(data_std.columns) if (col[0] in self.map_index_tickers['hangseng']) and ( col[1] == 'HighLow' )  ]]*len(data),
             'idx_hang_seng_stock': [ [ idx for idx, col in enumerate(data_std.columns) if (col[0] in self.map_index_tickers['hangseng'])  ] ]*len(data)
@@ -593,7 +594,6 @@ class DsetYahooStocksMaxMin(DsetYahooStocks):
 
             windows = windows.flat_map(sub_to_batch)
             return windows
-
         
         if epochs == 1:
             dset = make_window_dataset(dset, window_size=self.window_size, shift = self.window_shift, stride=1)
@@ -683,9 +683,6 @@ class DsetYahooStocksMaxMin(DsetYahooStocks):
                                         
                                          }
         )
-        
-
-
         
         #shuffle
         if shuffle_buffer_prop>0:

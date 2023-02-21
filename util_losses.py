@@ -153,18 +153,18 @@ class MeanRelativeError(tf.keras.metrics.Metric):
         self.count =  tf.constant(0.0, dtype=tf.float64)
         return None
 
-# class LogReturnLoss():
-# class LogReturnLoss():
-#     def __init__(self, name='logreturn', **kwargs):
-#         # super(LogReturnLoss, self).__init__(name=name, **kwargs)
-#         self.reset_state()
-#         self.update_state_non_masked_input = True
-#         self.name = name
-class LogReturnLoss(tf.keras.metrics.Metric):
+
+class LogReturnLoss():
     def __init__(self, name='logreturn', **kwargs):
-        super(LogReturnLoss, self).__init__(name=name, **kwargs)
+        # super(LogReturnLoss, self).__init__(name=name, **kwargs)
         self.reset_state()
         self.update_state_non_masked_input = True
+        self.name = name
+# class LogReturnLoss(tf.keras.metrics.Metric):
+#     def __init__(self, name='logreturn', **kwargs):
+#         super(LogReturnLoss, self).__init__(name=name, **kwargs)
+#         self.reset_state()
+#         self.update_state_non_masked_input = True
 
     def update_state(self, logreturn_daily, pred_logreturn, loss_mask, **kwargs):
 
@@ -186,37 +186,51 @@ class LogReturnLoss(tf.keras.metrics.Metric):
         # Then MSE with target return
         
         # Sum along the sequence dimension to get total log return for specific holiday seq for each stock in exchange
-        target_return = kwargs['target']
+
         scaler = kwargs.get('scaler')
         
         loss_mask = tf.cast(loss_mask, tf.bool)
         
         B, C, L, S = pred_logreturn.shape
+        
+        # descaling prediction -> log return
         pred_logreturn = einops.rearrange(pred_logreturn, 'b c l s -> (b l s) c', b=B, l=L, s=S, c=C)
         pred_logreturn = scaler.inverse_transform( pred_logreturn - 0.05 ) 
         pred_logreturn = einops.rearrange(pred_logreturn, '(b l s) c-> b c l s', b=B, l=L, s=S, c=C)
         
-        pred_logreturn1 = tf.where( loss_mask, pred_logreturn, tf.zeros_like(pred_logreturn))
+        pred_logreturn = tf.where( loss_mask, pred_logreturn, tf.zeros_like(pred_logreturn))
+        pred_logreturn = tf.reduce_sum( pred_logreturn, axis= -2 ) #( b, c, samples) # log return over holiday period 
         
-        pred_logreturn2 = tf.reduce_sum( pred_logreturn1, axis= -2 ) #( b, c, samples)
-        
-        # Filtering for relevant channels
+        # Loss mask for which stocks to calc return on 
         loss_mask_channel = tf.reduce_any(loss_mask, axis=-2) 
         
-        pred_logreturn3 = tf.boolean_mask(pred_logreturn2, loss_mask_channel )
-        pred_return = tf.math.exp(pred_logreturn3)
+        pred_logreturn = tf.boolean_mask(pred_logreturn, loss_mask_channel )
+        pred_return = tf.math.exp(pred_logreturn)
         
         # target_return = tf.broadcast_to(target_return, (B, C, S) )   
-        target_return = tf.tile(target_return, (1, 1, S) )        
-        target_return1 = tf.boolean_mask(target_return, loss_mask_channel)
+        
+        if 'target_return' in kwargs.keys():
+            target_return = kwargs.pop('target_return')
+            target_return = tf.tile(target_return, (1, 1, S) )        
+            
+        elif 'target_price' in kwargs.keys():
+            target_price = kwargs.pop('target_price') # (B, C, L)
+            target_price = tf.tile((tf.expand_dims(target_price,-1)), (1, 1, 1, 2)) 
+            target_price = tf.where(loss_mask, target_price, 1.0)
+            target_daily_return = target_price[:,:,1:,:] / target_price[:,:,:-1, :] #(B, C, L-1) 
+            target_price = tf.where(loss_mask, target_price, 0.0)
+            # The first term in the return series will be the price on the first day of holiday
+            target_return = tf.reduce_prod(1+target_daily_return, axis=-2) / tf.reduce_max(target_daily_return, axis=-2)
+        
+        kwargs['target'] = target_return
         
         # Handling errors relating to misidentified holidays or stocks in the same stock index having different holidays
-        mask_is_nan = tf.math.is_nan(target_return1)
-        target_return1 = tf.boolean_mask(target_return1, ~mask_is_nan)
+        target_return = tf.boolean_mask(target_return, loss_mask_channel)
+        mask_is_nan = tf.math.is_nan(target_return)
+        target_return = tf.boolean_mask(target_return, ~mask_is_nan)
         pred_return = tf.boolean_mask(pred_return, ~mask_is_nan)
         
-        loss = tf.keras.metrics.mean_squared_error(target_return1, pred_return)
-        
+        loss = tf.keras.metrics.mean_squared_error(target_return, pred_return)
         
         self.sum += tf.cast(loss, tf.float64)
         self.count += tf.convert_to_tensor(1.0, self.count.dtype)

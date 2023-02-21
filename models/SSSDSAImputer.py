@@ -8,7 +8,7 @@ ls = ks.layers
 import tensorflow_addons as tfa
 
 from einops import rearrange
-from models.S4Model import S4, LinearActivation, TransposedLinear
+from models.S4Model import S4, LinearActivation
 from util_layers import pytorch_he_uniform_init, Conv1d_with_init, pytorch_he_normal_init, swish, Conv
 
 from collections.abc import Iterable   # import 

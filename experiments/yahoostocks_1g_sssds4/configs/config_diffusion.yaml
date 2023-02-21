@@ -1,0 +1,6 @@
+T: 200
+beta_0: 0.0001
+beta_T: 0.02
+mask_method: rm
+missing_k: '90'
+tgt_mask_method: tgt_all_remaining

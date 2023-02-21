@@ -428,7 +428,8 @@
             "LD_LIBRARY_PATH":"/home/akann1w0w1ck/miniconda3/lib/:/home/akann1w0w1ck/miniconda3/lib/python3.10/site-packages/tensorrt/"
             },
             "args": [
-                "--exp_name", "debug_csdis4_yahoo_1g",
+                // "--exp_name", "debug_csdis4_yahoo_1g",
+                "--exp_name", "yahoostocks_1g_csdis4",
                 "--dataset_name", "stocks_maxmin",
                 "--test_set_method","holidays_only",
 
@@ -441,16 +442,15 @@
                 "--start_prop_test","0.8",
                 "--end_prop_test","1.0",
 
-                // "--debugging",
-                // "--test_only",
+                "--debugging",
+                "--test_only",
 
                 "--model_name","CSDIS4",
-                "--diffusion_method","csdi", 
+                "--diffusion_method","csdi",
 
                 "--mixed_precision",
                 "--eager",
                 
-
                 "--window_size","10",
                 "--window_shift","1",
                 
@@ -464,7 +464,7 @@
                 // "--validation_steps", "2",
                 
                 "--batch_size","8",
-                "--batch_size_val","24",
+                "--batch_size_val","48",
                 
                 "--pred_samples", "2",
                 "--num_steps","5",
@@ -493,7 +493,7 @@
 
 
             ]
-        }
+        },
         {
             "name": "ImputationMethods_SSSDS4_stocks_1e",
             "type": "python",
