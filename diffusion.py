@@ -297,7 +297,9 @@ def get_cond_mask_bm_channel(shape, k="0 29 29 103 103 124" ):
         li_seg_len = random.choices( [2,3,4], weights=[0.81, 0.143, 0.04 ] , k=batch )
         
         # starting index for each segment to be masked
-        li_seg_sidx = [  random.choice(range(0, seq_len-l)) for l in li_seg_len]
+        # NOTE: the max position of seq_len-l-1 ensures that the lastelement in sequence is not a holiday
+            # This allows us to calculate return over a holiday from prices
+        li_seg_sidx = [  random.choice(range(0, seq_len-l-1)) for l in li_seg_len]
         
         for batch_idx in range(batch):
             s_xchng = li_exchange_to_mask[batch_idx][0]
@@ -475,7 +477,7 @@ class DiffusionAlvarez(ls.Layer, MaskingMixinAlvarez):
         x = tf.stop_gradient(x) #(b*samples, d, seq)
 
         # Converting back to (b, samples, d, seq)
-        x = einops.rearrange(x, '(b s) ... -> b s ...', s=pred_samples )
+        x = einops.rearrange(x, '(b s) ... -> b ... s', s=pred_samples )
 
         return x
 
@@ -616,49 +618,47 @@ class DiffusionCSDI(ls.Layer, MaskingMixinCSDI):
         dtype = dtype if dtype is not None else self.compute_dtype
 
         B, K, L = size
-        li_imputed_samples = []
-        imputed_samples = tf.zeros((B, pred_samples, K, L), dtype)
-        cond_mask = tf.cast(cond_mask, dtype)
-        observed = tf.cast(observed, dtype)
-                    
-        for i in range(pred_samples):
+                           
 
-            current_sample = std_normal(size, dtype)
+        # extending in batch dimension for sampling in one pass through
+        current_sample = std_normal( (B, K, L*pred_samples), dtype)
+        observed = tf.cast(tf.repeat(observed, pred_samples, axis=0), dtype)
+        cond_mask = tf.cast(tf.repeat(cond_mask, pred_samples, axis=0), dtype)
 
-            for t in range(self.num_steps - 1, -1, -1):
-                cond_obs = (cond_mask * observed)[:, tf.newaxis]
-                
-                # if self.tgt_mask_method == 'tgt_all_remaining':
-                noisy_target = ((1 - cond_mask) * current_sample )[:, tf.newaxis]
-
-                inp = tf.concat([cond_obs, noisy_target], axis=1)  # (B,2,K,L)
-                
-                predicted = model(inp, cond_mask, tf.constant([t], dtype=tf.int64))
-
-                alpha_hat_t = tf.cast(self.alpha_hat[t], dtype)
-                alpha_t = tf.cast(self.alpha_tf[t], dtype)
-
-                coeff1 = 1 / alpha_hat_t ** 0.5
-                coeff2 = (1 - alpha_hat_t) / (1 - alpha_t) ** 0.5
-                current_sample = coeff1 * (current_sample - coeff2 * predicted)
-                
-                if t > 0:
-                    # noise = torch.randn_like(current_sample)
-                    noise = std_normal(size, predicted.dtype)
-                    
-                    alpha_tm1 = tf.cast(self.alpha_tf[t-1], dtype)
-                    betat = tf.cast(self.beta[t], dtype)
-                    sigma = (
-                                    (1.0 - alpha_tm1) / (1.0 - alpha_t) * betat
-                            ) ** 0.5
-                    current_sample += noise * sigma
+        for t in range(self.num_steps - 1, -1, -1):
+            cond_obs = (cond_mask * observed)[:, tf.newaxis]
             
-            li_imputed_samples.append( current_sample )
-            # imputed_samples[:, i] = current_sample
+            # if self.tgt_mask_method == 'tgt_all_remaining':
+            noisy_target = ((1 - cond_mask) * current_sample )[:, tf.newaxis]
 
-        li_imputed_samples = tf.stack(li_imputed_samples, axis=0)
+            inp = tf.concat([cond_obs, noisy_target], axis=1)  # (B,2,K,L)
+            
+            predicted = model(inp, cond_mask, tf.constant([t], dtype=tf.int64))
 
-        return imputed_samples
+            alpha_hat_t = tf.cast(self.alpha_hat[t], dtype)
+            alpha_t = tf.cast(self.alpha_tf[t], dtype)
+
+            coeff1 = 1 / alpha_hat_t ** 0.5
+            coeff2 = (1 - alpha_hat_t) / (1 - alpha_t) ** 0.5
+            current_sample = coeff1 * (current_sample - coeff2 * predicted)
+            
+            if t > 0:
+                # noise = torch.randn_like(current_sample)
+                noise = std_normal(size, predicted.dtype)
+                
+                alpha_tm1 = tf.cast(self.alpha_tf[t-1], dtype)
+                betat = tf.cast(self.beta[t], dtype)
+                sigma = (
+                                (1.0 - alpha_tm1) / (1.0 - alpha_t) * betat
+                        ) ** 0.5
+                current_sample += noise * sigma
+        
+        current_sample = tf.stop_gradient(current_sample) #(b*samples, d, seq)
+        
+        
+        current_sample = einops.rearrange(current_sample, '(b s) ... -> b ... s', s=pred_samples )
+
+        return current_sample
 
     @staticmethod
     def parse_config(parent_parser):
