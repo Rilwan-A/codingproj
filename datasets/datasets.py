@@ -351,17 +351,13 @@ class DsetYahooStocks():
             for idx in range( len(dict_index_trainingwindowinfo[index] ) ):
                 
                 holidayinfo = dict_index_trainingwindowinfo[index][idx] # holidayinfo {s_idx:s, len:l}
-                
-                # Get the start idx of the window relative to s_idx
-                # li_w_idx_relative = random.sample( range(0, -(self.window_size-holidayinfo['len']), -1), 5  )
-                # dict_index_trainingwindowinfo[index][idx]['li_w_idx_relative'] = li_w_idx_relative
-                
+                                
                 # Get the start idx of the window
                 s_idx = holidayinfo['s_idx']
                 l = holidayinfo['len']
 
                 window_bound_start =  max(0, s_idx+l-self.window_size)
-                window_bound_end = min(s_idx, data_std.shape[0]-self.window_size )
+                window_bound_end = min(s_idx+l+1, data_std.shape[0]-self.window_size-1 )
                 window_sample_count = self.window_sample_count
                 li_w_idx = random.sample( range(  window_bound_start, window_bound_end+1 ), window_sample_count )
                 dict_index_trainingwindowinfo[index][idx]['li_w_idx'] = li_w_idx

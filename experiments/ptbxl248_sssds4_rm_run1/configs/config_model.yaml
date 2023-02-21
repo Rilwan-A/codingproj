@@ -1,0 +1,14 @@
+conv_channels_first: false
+diffusion_step_embed_dim_in: 128
+diffusion_step_embed_dim_mid: 256
+diffusion_step_embed_dim_out: 256
+in_channels: 12
+num_res_layers: 36
+out_channels: 12
+res_channels: 256
+s4_bidirectional: true
+s4_d_state: 64
+s4_dropout: 0.0
+s4_layernorm: 1
+s4_lmax: 250
+skip_channels: 256

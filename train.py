@@ -8,7 +8,7 @@ import argparse
 from argparse import ArgumentParser
 import tensorflow as tf
 
-tf.get_logger().setLevel('ERROR')
+# tf.get_logger().setLevel('ERROR')
 # tf.config.run_functions_eagerly(True)
 physical_devices = tf.config.list_physical_devices('GPU')
 try:
@@ -292,10 +292,9 @@ class ImputationTrainer(tf.keras.Model):
 
             cond_mask=cond_mask,
             pred_samples=self.pred_samples
-        ) # (bs, pred_samples, d, seq )
+        ) # (bs, d, seq, pred_sample )
         
         # Creating expanded versions to match m samples per prediction
-        generated_audio = tf.transpose( generated_audio, (0,2,3,1) ) #(bs, d, seq, pred_sample)
         audio_expanded = tf.broadcast_to( audio[..., tf.newaxis], generated_audio.shape ) 
         loss_mask_expanded = tf.broadcast_to(loss_mask[..., tf.newaxis], generated_audio.shape )
         
@@ -346,7 +345,7 @@ class ImputationTrainer(tf.keras.Model):
         super(ImputationTrainer, self).compile(**kwargs)
         
         self.optimizer = optimizer
-        self.optimizer.jit_compile = kwargs.get( 'jit_compile', False )
+        self.optimizer.jit_compile = False
         self.mixed_precision = mixed_precision
         
         if self.mixed_precision is True:
@@ -402,12 +401,12 @@ class ImputationTrainer(tf.keras.Model):
         callbacks.append(
             ks.callbacks.EarlyStopping(
                 monitor='val_loss',
-                patience=8,
+                patience=10,
                 verbose=1,
                 )
             )
         
-        prog_bar = tfa.callbacks.TQDMProgressBar(metrics_format='{name}: {value:e}')
+        prog_bar = tfa.callbacks.TQDMProgressBar(metrics_format='{name}: {value:.2e}')
         callbacks.append(prog_bar)
 
         callbacks.append(
@@ -443,7 +442,6 @@ class ImputationTrainer(tf.keras.Model):
 
         
         trainer.compile(
-            jit_compile = config_trainer.jit_compile,
             run_eagerly=config_trainer.eager,
             optimizer = optimizer,
             mixed_precision = config_trainer.mixed_precision
@@ -517,8 +515,7 @@ class ImputationTrainer(tf.keras.Model):
 
         callbacks = [
             # ImputationTrainerCallback
-            tfa.callbacks.TQDMProgressBar(metrics_format='{name}: {value:e}')
-,
+            tfa.callbacks.TQDMProgressBar(metrics_format='{name}: {value:.2e}'),
             ImputationTrainerCallback( config_trainer.dir_ckpt, config_trainer.exp_name)
             ]
 
@@ -570,7 +567,6 @@ class ImputationTrainer(tf.keras.Model):
         parser.add_argument("--optimizer", default='adam', type=str, choices=['adam','adafactor'])
         parser.add_argument("--mixed_precision", action='store_true')
         parser.add_argument("--eager", action='store_true') 
-        parser.add_argument("--jit_compile", action='store_true') 
         parser.add_argument("--grad_accum", default=None, type=int)
         
         parser.add_argument("--workers", default=10, type=int )

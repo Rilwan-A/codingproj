@@ -551,10 +551,10 @@ class DiffusionCSDI(ls.Layer, MaskingMixinCSDI):
 
         alpha_hat = 1 - beta
         alpha = np.cumprod(alpha_hat)
-        alpha_tf = tf.cast( tf.constant(alpha), self.compute_dtype)
+        alpha_tf = tf.constant(alpha)[:,tf.newaxis, tf.newaxis]
+
         # alpha_tf = tf.cast( tf.constant(alpha), tf.float64)
-        
-        return tf.constant(beta, dtype=self.compute_dtype), tf.constant(alpha_hat, self.compute_dtype), alpha_tf[:,tf.newaxis, tf.newaxis]
+        return tf.constant(beta, dtype=tf.float32), tf.constant(alpha_hat, tf.float32), tf.cast(alpha_tf, tf.float32)
           
     def call(self, model, observed_data, cond_mask, eval_all_timesteps=False):
 
@@ -599,9 +599,9 @@ class DiffusionCSDI(ls.Layer, MaskingMixinCSDI):
             #Training Loop
             diffusion_steps = tf.experimental.numpy.random.randint(0, self.num_steps, size=(B,))  # randomly sample diffusion steps from 1~T
 
-            current_alpha = tf.gather( self.alpha_tf, diffusion_steps ) # (B,1,1)
-
+            current_alpha = tf.cast( tf.gather( self.alpha_tf, diffusion_steps ), self.compute_dtype) # (B,1,1)
             noise = std_normal( observed_data.shape, self.compute_dtype )
+            
             noisy_data = (current_alpha ** 0.5) * observed_data + (1.0 - current_alpha) ** 0.5 * noise
             cond_obs = (cond_mask * observed_data)[:, tf.newaxis]
 
@@ -621,11 +621,12 @@ class DiffusionCSDI(ls.Layer, MaskingMixinCSDI):
                            
 
         # extending in batch dimension for sampling in one pass through
-        current_sample = std_normal( (B, K, L*pred_samples), dtype)
+        current_sample = std_normal( (pred_samples*B, K, L), dtype)
         observed = tf.cast(tf.repeat(observed, pred_samples, axis=0), dtype)
         cond_mask = tf.cast(tf.repeat(cond_mask, pred_samples, axis=0), dtype)
 
         for t in range(self.num_steps - 1, -1, -1):
+        # for t in range(self.num_steps - 1, 0, -1):
             cond_obs = (cond_mask * observed)[:, tf.newaxis]
             
             # if self.tgt_mask_method == 'tgt_all_remaining':
@@ -644,7 +645,7 @@ class DiffusionCSDI(ls.Layer, MaskingMixinCSDI):
             
             if t > 0:
                 # noise = torch.randn_like(current_sample)
-                noise = std_normal(size, predicted.dtype)
+                noise = std_normal((B*pred_samples,K,L) , predicted.dtype)
                 
                 alpha_tm1 = tf.cast(self.alpha_tf[t-1], dtype)
                 betat = tf.cast(self.beta[t], dtype)
@@ -654,7 +655,6 @@ class DiffusionCSDI(ls.Layer, MaskingMixinCSDI):
                 current_sample += noise * sigma
         
         current_sample = tf.stop_gradient(current_sample) #(b*samples, d, seq)
-        
         
         current_sample = einops.rearrange(current_sample, '(b s) ... -> b ... s', s=pred_samples )
 
