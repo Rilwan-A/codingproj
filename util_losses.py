@@ -186,17 +186,10 @@ class LogReturnLoss():
         # Then MSE with target return
         
         # Sum along the sequence dimension to get total log return for specific holiday seq for each stock in exchange
-
-        scaler = kwargs.get('scaler')
         
         loss_mask = tf.cast(loss_mask, tf.bool)
         
         B, C, L, S = pred_logreturn.shape
-        
-        # descaling prediction -> log return
-        pred_logreturn = einops.rearrange(pred_logreturn, 'b c l s -> (b l s) c', b=B, l=L, s=S, c=C)
-        pred_logreturn = scaler.inverse_transform( pred_logreturn - 0.05 ) 
-        pred_logreturn = einops.rearrange(pred_logreturn, '(b l s) c-> b c l s', b=B, l=L, s=S, c=C)
         
         pred_logreturn = tf.where( loss_mask, pred_logreturn, tf.zeros_like(pred_logreturn))
         pred_logreturn = tf.reduce_sum( pred_logreturn, axis= -2 ) #( b, c, samples) # log return over holiday period 
@@ -204,8 +197,8 @@ class LogReturnLoss():
         # Loss mask for which stocks to calc return on 
         loss_mask_channel = tf.reduce_any(loss_mask, axis=-2) 
         
-        pred_logreturn = tf.boolean_mask(pred_logreturn, loss_mask_channel )
-        pred_return = tf.math.exp(pred_logreturn)
+        
+        
         
         # target_return = tf.broadcast_to(target_return, (B, C, S) )   
         
@@ -225,10 +218,14 @@ class LogReturnLoss():
         kwargs['target'] = target_return
         
         # Handling errors relating to misidentified holidays or stocks in the same stock index having different holidays
-        target_return = tf.boolean_mask(target_return, loss_mask_channel)
-        mask_is_nan = tf.math.is_nan(target_return)
-        target_return = tf.boolean_mask(target_return, ~mask_is_nan)
-        pred_return = tf.boolean_mask(pred_return, ~mask_is_nan)
+        target_return_masked = tf.boolean_mask(target_return, loss_mask_channel)
+        pred_logreturn_masked = tf.boolean_mask(pred_logreturn, loss_mask_channel )
+        pred_return_masked = tf.math.exp(pred_logreturn_masked)
+        
+        
+        mask_is_nan = tf.math.is_nan(target_return_masked)
+        target_return = tf.boolean_mask(target_return_masked, ~mask_is_nan)
+        pred_return = tf.boolean_mask(pred_return_masked, ~mask_is_nan)
         
         loss = tf.keras.metrics.mean_squared_error(target_return, pred_return)
         

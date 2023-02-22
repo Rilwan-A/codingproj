@@ -474,8 +474,6 @@ class DiffusionAlvarez(ls.Layer, MaskingMixinAlvarez):
             if t > 0:
                 x = x + tf.cast(Sigma[t],x.dtype)  * std_normal( [ size[0]*pred_samples, *size[1:] ] ) # add the variance term to x_{t-1}
         
-        x = tf.stop_gradient(x) #(b*samples, d, seq)
-
         # Converting back to (b, samples, d, seq)
         x = einops.rearrange(x, '(b s) ... -> b ... s', s=pred_samples )
 
@@ -626,7 +624,6 @@ class DiffusionCSDI(ls.Layer, MaskingMixinCSDI):
         cond_mask = tf.cast(tf.repeat(cond_mask, pred_samples, axis=0), dtype)
 
         for t in range(self.num_steps - 1, -1, -1):
-        # for t in range(self.num_steps - 1, 0, -1):
             cond_obs = (cond_mask * observed)[:, tf.newaxis]
             
             # if self.tgt_mask_method == 'tgt_all_remaining':
@@ -654,8 +651,7 @@ class DiffusionCSDI(ls.Layer, MaskingMixinCSDI):
                         ) ** 0.5
                 current_sample += noise * sigma
         
-        current_sample = tf.stop_gradient(current_sample) #(b*samples, d, seq)
-        
+                
         current_sample = einops.rearrange(current_sample, '(b s) ... -> b ... s', s=pred_samples )
 
         return current_sample

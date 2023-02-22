@@ -1,7 +1,4 @@
 import math
-# import torch
-# import torch.nn as nn
-# import torch.nn.functional as F
 
 import tensorflow as tf
 from tensorflow import keras as ks
@@ -10,7 +7,7 @@ import tensorflow_addons as tfa
 
 from models.S4Model import S4Layer
 from util_layers import pytorch_he_uniform_init, Conv1d_with_init, swish, Conv
-
+from util_layers import ScaleLayer
 import argparse
 import numpy as np 
 
@@ -26,9 +23,10 @@ class SSSDS4Imputer(ls.Layer):
                  s4_bidirectional,
                  s4_layernorm,
                  conv_channels_first,
+                 scale_output = False,
                  **kwargs):
         super(SSSDS4Imputer, self).__init__()
-
+        self.scale_output = scale_output
         # self.init_conv = nn.Sequential(Conv(in_channels, res_channels, kernel_size=1), nn.ReLU())
         self.diffusion_step_embed_dim_in = diffusion_step_embed_dim_in
         
@@ -57,6 +55,14 @@ class SSSDS4Imputer(ls.Layer):
                                             ls.ReLU(),
                                             ZeroConv1d(skip_channels, out_channels, conv_channels_first=self.conv_channels_first, dtype=tf.float32)]       
                                         )
+        if self.scale_output:
+            self.final_conv = tf.keras.Sequential(
+                [
+                    self.final_conv,
+                    ScaleLayer(dtype=tf.float32)
+                ]
+            )
+        
 
     def call(self, noise, conditional, cond_mask, diffusion_steps):
         
@@ -272,7 +278,8 @@ class ZeroConv1d(ls.Layer):
         self.conv = ls.Conv1D(filters, kernel_size=1, padding='valid', 
                         data_format='channels_first' if conv_channels_first else 'channels_last', 
                         kernel_initializer=tf.keras.initializers.Zeros(),
-                        bias_initializer=tf.keras.initializers.Zeros(),
+                        # bias_initializer=tf.keras.initializers.Zeros(),
+                        bias_initializer=pytorch_he_uniform_init( in_channels ),
                         dtype=dtype)
 
         if conv_channels_first==False:

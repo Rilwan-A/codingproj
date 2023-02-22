@@ -30,6 +30,7 @@ from __init__ import MAP_NAME_DIFFUSION, MAP_NAME_DSET, MAP_MNAME_MODEL
 import math
 from transformers.optimization_tf import WarmUp
 import einops
+from sklearn.preprocessing import QuantileTransformer
 
 # Utility funcs: paramter conversion
 def config_trainer_param_adjust(config_trainer, batched_dset_len=None ):
@@ -174,7 +175,9 @@ class ImputationTrainer(tf.keras.Model):
     def step(self, batch, eval_all_timesteps=False, step_name='val'):
         
         audio, observed_mask, cond_mask, loss_mask, other = self.unpack_batch(batch)
-                
+        
+        audio = (audio * tf.cast(observed_mask,audio.dtype))
+          
         cond_mask = cond_mask if (cond_mask is not None) else self.diffusion.get_cond_mask(audio.shape, 
                         self.diffusion.mask_method,
                         self.diffusion.missing_k,
@@ -188,6 +191,8 @@ class ImputationTrainer(tf.keras.Model):
 
         # data pass through
         with tf.GradientTape() if (step_name == 'train') else nullcontext() as tape:
+            
+            
             
             # Forward Step
             epsilon_theta, epsilon = self(audio, cond_mask, eval_all_timesteps=eval_all_timesteps)
@@ -303,8 +308,14 @@ class ImputationTrainer(tf.keras.Model):
             B, C, L, S = generated_audio.shape
             generated_audio = einops.rearrange(generated_audio, 'b c l s -> (b l s) c')
             audio_expanded = einops.rearrange(audio_expanded, 'b c l s -> (b l s) c')
-            generated_audio = self.scaler.inverse_transform( generated_audio.numpy() - 0.05 )
-            audio_expanded = self.scaler.inverse_transform( audio_expanded.numpy() - 0.05 )
+            
+            if isinstance(self.scaler, QuantileTransformer):
+                generated_audio = generated_audio.numpy() - 0.05
+                audio_expanded = audio_expanded.numpy() - 0.05
+                
+            generated_audio = self.scaler.inverse_transform( generated_audio )
+            audio_expanded = self.scaler.inverse_transform( audio_expanded )
+            
             generated_audio = einops.rearrange(generated_audio, '(b l s) c -> b c l s', b=B, l=L, s=S, c=C)
             audio_expanded = einops.rearrange(audio_expanded, '(b l s) c ->  b c l s', b=B, l=L, s=S, c=C)
             
@@ -401,7 +412,7 @@ class ImputationTrainer(tf.keras.Model):
         callbacks.append(
             ks.callbacks.EarlyStopping(
                 monitor='val_loss',
-                patience=10,
+                patience=config_trainer.patience,
                 verbose=1,
                 )
             )
@@ -553,9 +564,8 @@ class ImputationTrainer(tf.keras.Model):
             'ptbxl_1000',
             'stocks',
             'stocks_maxmin'])
-        parser.add_argument("--diffusion_method", default='alvarez', choices=["alvarez","csdi"])
+        parser.add_argument("--diffusion_method", default='alvarez', choices=["alvarez", "csdi"])
         
-
         # training settings
         parser.add_argument("--gpus", default=1, type=int)
         parser.add_argument("--epochs", default=None, type=int)
@@ -568,6 +578,7 @@ class ImputationTrainer(tf.keras.Model):
         parser.add_argument("--mixed_precision", action='store_true')
         parser.add_argument("--eager", action='store_true') 
         parser.add_argument("--grad_accum", default=None, type=int)
+        parser.add_argument("--patience", default=20, type=int)
         
         parser.add_argument("--workers", default=10, type=int )
         

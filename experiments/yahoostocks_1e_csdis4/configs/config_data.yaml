@@ -10,5 +10,5 @@ start_prop_train: 0.0
 start_prop_val: 0.8
 test_set_method: holidays_only
 window_sample_count: 3
-window_shift: null
+window_shift: 5
 window_size: 20

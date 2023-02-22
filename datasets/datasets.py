@@ -8,7 +8,7 @@ import yaml
 import copy 
 import pandas as pd
 import random
-from sklearn.preprocessing import StandardScaler, MinMaxScaler, QuantileTransformer
+from sklearn.preprocessing import StandardScaler, QuantileTransformer
 from sklearn.utils.validation import check_is_fitted
 from sklearn.exceptions import NotFittedError
 
@@ -59,11 +59,13 @@ class DsetYahooStocks():
         
         self.window_sample_count = window_sample_count
         
-        # self.scaler = StandardScaler()
-        # self.scaler = MinMaxScaler(feature_range=(0,1)) 
-        self.scaler = scaler if (scaler is not None) else QuantileTransformer( n_quantiles=2000, subsample=10000 ) 
-            #NOTE: implications lowerst log return now has same value as non observed values if we fill with 0
-     
+        
+        if scaler is None:
+            self.scaler = None
+        elif scaler == 'quantile':
+            self.scaler = QuantileTransformer( n_quantiles=2000, subsample=10000 ) 
+        elif scaler  == 'standard':
+            self.scaler = StandardScaler()     
     @lru_cache
     def __len__(self):
         return len(pickle.load( open(self.data_path,"rb")))  // self.window_shift
@@ -124,9 +126,14 @@ class DsetYahooStocks():
         data = self.log_return_transform(data)
         
         try:
-            data_std = self.scaler.transform(data.values) + 0.05
+            data_std = self.scaler.transform(data.values)
+            if isinstance(self.scaler, QuantileTransformer):
+                data_std = data_std + 0.05
+        
         except NotFittedError:
-            data_std = self.scaler.fit_transform(data.values) + 0.05
+            data_std = self.scaler.fit_transform(data.values)
+            if isinstance(self.scaler, QuantileTransformer):
+                data_std = data_std + 0.05
 
         data_std = pd.DataFrame(data_std, index=data.index, columns=data.columns)
 
@@ -165,7 +172,7 @@ class DsetYahooStocks():
 
         
         if epochs == 1:
-            dset = make_window_dataset(dset, window_size=self.window_size, shift = self.window_size, stride=1)
+            dset = make_window_dataset(dset, window_size=self.window_size, shift = self.window_shift, stride=1)
 
         elif epochs > 1 and shuffle_buffer_prop == 0:
             dset = dset.repeat(epochs)
@@ -176,7 +183,7 @@ class DsetYahooStocks():
             li_dsets = [None]*epochs
             for idx in range(epochs):
                 _ = dset.skip(random.randint(0, self.window_size-1))
-                dset_window = make_window_dataset(_, window_size=self.window_size, shift = self.window_size, stride=1)
+                dset_window = make_window_dataset(_, window_size=self.window_size, shift = self.window_shift, stride=1)
                 li_dsets[idx] = dset_window
             
             dset = li_dsets[0]
@@ -280,7 +287,6 @@ class DsetYahooStocks():
         data = data.join( data_currency  )
 
         # date filtering
-        
         if e_idx is not None:
             e_date = data.index[e_idx]
             data = data[ data.index <= e_date]
@@ -293,7 +299,11 @@ class DsetYahooStocks():
         # Apply log return transformation to price data
         data_price = copy.deepcopy(data[1:])
         data = self.log_return_transform(data)
-        data_std = self.scaler.fit_transform(data.values) + 0.05
+        
+        data_std = self.scaler.fit_transform(data.values)
+        if isinstance(self.scaler, QuantileTransformer):
+            data_std = data_std + 0.05
+        
         data_std = pd.DataFrame(data_std,
                                 index=data_price.index,
                                 columns=data_price.columns)
@@ -335,7 +345,7 @@ class DsetYahooStocks():
                 elif prev_val == True and val == False:
                     li_start_end_idxs[-1]['len'] = idx - li_start_end_idxs[-1]['s_idx']
                     continue
-            
+            li_start_end_idxs = [ d for d in li_start_end_idxs if d['len'] is not None ]
             dict_index_holidayinfo[index] = li_start_end_idxs
 
             
@@ -358,8 +368,10 @@ class DsetYahooStocks():
 
                 window_bound_start =  max(0, s_idx+l-self.window_size)
                 window_bound_end = min(s_idx+l+1, data_std.shape[0]-self.window_size-1 )
-                window_sample_count = self.window_sample_count
-                li_w_idx = random.sample( range(  window_bound_start, window_bound_end+1 ), window_sample_count )
+                li_w_idx = random.sample( 
+                                         range(  window_bound_start, window_bound_end+1 ),
+                                         k = min(self.window_sample_count, window_bound_end+1-window_bound_start ) 
+                                         ) 
                 dict_index_trainingwindowinfo[index][idx]['li_w_idx'] = li_w_idx
                 
         
@@ -482,12 +494,15 @@ class DsetYahooStocks():
         
         parser = argparse.ArgumentParser(parents=[parent_parser], add_help=True, allow_abbrev=False)
 
+        # scaler
+        parser.add_argument("--scaler", type=str, default='quantile', choices=['quantile','standard'] )
+        
         # dataset location
         parser.add_argument("--dir_data", type=str, default='./datasets/yahoo_data/')
         parser.add_argument("--window_size", type=int, default=20)
         parser.add_argument("--window_shift", type=int, default=None)
         parser.add_argument("--window_sample_count", type=int, default=1)
-        
+               
         
         parser.add_argument("--shuffle_buffer_prop", type=float, 
                             default=0.99,
@@ -553,9 +568,14 @@ class DsetYahooStocksMaxMin(DsetYahooStocks):
         data = data.drop( [c for c in data.columns if c[1] in ['High','Low'] ] , axis=1)
         
         try:
-            data_std = self.scaler.transform(data.values) + 0.05
+            data_std = self.scaler.transform(data.values)
+            if isinstance(self.scaler, QuantileTransformer):
+                data_std = data_std + 0.05
         except NotFittedError:
-            data_std = self.scaler.fit_transform(data.values) + 0.05
+            data_std = self.scaler.fit_transform(data.values) 
+            if isinstance(self.scaler, QuantileTransformer):
+                data_std = data_std + 0.05
+            
 
         data_std = pd.DataFrame(data_std, index=data.index, columns=data.columns)
 
@@ -569,7 +589,7 @@ class DsetYahooStocksMaxMin(DsetYahooStocks):
                              
         dict_data = {
             'data':data_std.fillna(0.0).values,
-            'target_price':data.values,
+            # 'target_price':data.values,
             'observed_mask':np.logical_and(~mask_holiday, ~tf.cast(mask_pre_record, dtype=tf.bool)),
             'idx_hilo_hang_seng_stock': [[ idx for idx, col in enumerate(data_std.columns) if (col[0] in self.map_index_tickers['hangseng']) and ( col[1] == 'HighLow' )  ]]*len(data),
             'idx_hang_seng_stock': [ [ idx for idx, col in enumerate(data_std.columns) if (col[0] in self.map_index_tickers['hangseng'])  ] ]*len(data)
@@ -612,31 +632,7 @@ class DsetYahooStocksMaxMin(DsetYahooStocks):
 
         # Adding Loss Mask - aim is to only predict last HighLow columns in window for stocks in HangSang Index 
         def get_loss_mask(shape, idx_hilo_hang_seng_stock):
-            
-            # loss_mask = tf.zeros(shape, dtype=tf.float32)
-            
-            # idx_hilo_hang_seng_stock = idx_hilo_hang_seng_stock[0]
-            
-            # idxs0 = -tf.ones_like(idx_hilo_hang_seng_stock, dtype=idx_hilo_hang_seng_stock.dtype)
-            # idxs = tf.stack( [idxs0, idx_hilo_hang_seng_stock], axis=-1 ) 
-                                              
-            # idxs = tf.split(idxs, idxs.shape[0],axis=0) 
-            
-            # tf.print(idxs)
-            
-            # tf.print(loss_mask.shape)
-            
-            # loss_mask = tf.tensor_scatter_nd_update(loss_mask, 
-            #                             idxs,
-            #                             tf.ones( idx_hilo_hang_seng_stock.shape[1] ) )   
-            
-            # L, C = shape
-        
-            # mask0 = tf.zeros( (L-1, C), dtype=tf.float32)
-            # mask1 = tf.zeros( (1, C-idx_hilo_hang_seng_stock.shape[1] ), dtype=tf.float32 )
-            # mask2 = tf.ones( (1, idx_hilo_hang_seng_stock.shape[1] ), dtype=tf.float32 )
-            # loss_mask = tf.concatenate( [mask1, mask2]
-                                       
+                                                  
 
             L, C = shape
             
@@ -698,7 +694,6 @@ class DsetYahooStocksMaxMin(DsetYahooStocks):
 
         return dset
     
-
     def get_dset_test(self, batch_size, indexes_to_include=['eurostoxx','hangseng','dowjones'] ):
         """ Generate test set
 

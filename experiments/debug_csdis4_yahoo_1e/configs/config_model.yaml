@@ -1,11 +1,12 @@
 channels: 64
 conv_channels_first: false
-diffusion_embedding_dim: 128
+diffusion_embedding_dim: 64
 featureemb: 128
 layers: 4
 nheads: 8
 num_steps: 50
 s4_lmax: 22
-target_dim: 380
-time_layer_d_state: 8
+scale_output: true
+target_dim: 126
+time_layer_d_state: 64
 timeemb: 16

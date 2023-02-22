@@ -1,13 +1,10 @@
 import numpy as np
 import random
 
-from tqdm import tqdm
+
 
 import argparse
-import yaml
 
-from functools import partial
-from scipy import special as ss
 
 from einops import rearrange, repeat
 import opt_einsum as oe
@@ -22,6 +19,7 @@ from argparse import ArgumentParser
 import einops
 import keras_nlp
 
+from util_layers import ScaleLayer
 contract = oe.contract
 contract_expression = oe.contract_expression
 
@@ -47,6 +45,7 @@ class CSDIS4(ls.Layer):
                     conv_channels_first=True,
                     time_layer_d_state=64,
                     # eval_all_timestep=False,
+                    scale_output=False,
                     **kwargs):
 
         super().__init__()
@@ -59,7 +58,8 @@ class CSDIS4(ls.Layer):
         self.layers = layers
         self.nheads = nheads
         self.s4_lmax = s4_lmax
-        
+        self.scale_output = scale_output
+
         # self.eval_all_timestep = eval_all_timestep
         
         self.input_dim = 2 
@@ -91,12 +91,21 @@ class CSDIS4(ls.Layer):
 
         self.input_projection = Conv1d_with_init(self.input_dim, self.channels, 1, conv_channels_first=conv_channels_first)
         self.output_projection1 = Conv1d_with_init(self.channels, self.channels, 1, conv_channels_first=conv_channels_first)
-        
         # Output of model should be float32, whether or not mixed precision is used
-        self.output_projection2 = Conv1d_with_init(self.channels, 1, 1, kernel_initializer=tf.keras.initializers.Zeros(),conv_channels_first=conv_channels_first, dtype=tf.float32)
+        self.output_projection2 = Conv1d_with_init(self.channels, 1, 1, 
+                                                   kernel_initializer=tf.keras.initializers.Zeros(),
+                                                   conv_channels_first=conv_channels_first, dtype=tf.float32)
+
+        if self.scale_output:
+                 
+            self.output_projection2 = tf.keras.Sequential(
+                [
+                    self.output_projection2,
+                    ScaleLayer( dtype=tf.float32)
+                ]
+            )
 
         
-
     def build(self, input_shape):
         
         super().build(input_shape)
@@ -180,6 +189,8 @@ class CSDIS4(ls.Layer):
         #NOTE: param below should be renamed, technically it is acctually the input channel dimension, not target dimension
 
         parser.add_argument("--target_dim", default=12, type=int)
+        
+        parser.add_argument("--scale_output", action='store_true' )
 
         parser.add_argument("--timeemb", default=16, type=int)
         parser.add_argument("--featureemb", default=128, type=int)
@@ -316,17 +327,9 @@ class ResidualBlock(ls.Layer):
         return y
 
 def get_tf_trans(heads=8, layers=1, channels=64):
-    
-    # encoder = keras_nlp.layers.TransformerEncoder(
-    #     intermediate_dim = channels, 
-    #     num_heads = heads,
-    #     dropout = 0.0,
-    #     activation="gelu",
-    # )
-    
-    
+        
     encoder = tfm.nlp.models.TransformerEncoder(
-        num_layers=1,
+        num_layers=layers,
         num_attention_heads=heads,
         
         intermediate_size=channels, #64
@@ -337,147 +340,3 @@ def get_tf_trans(heads=8, layers=1, channels=64):
     )
     
     return encoder
-
-# region ==== Imputation stuff e.g. loss/diffuse
-def mask_missing_train_rm(data, missing_ratio=0.0):
-    observed_values = np.array(data)
-    observed_masks = ~np.isnan(observed_values)
-
-    masks = observed_masks.reshape(-1).copy()
-    obs_indices = np.where(masks)[0].tolist()
-    miss_indices = np.random.choice(obs_indices, int(len(obs_indices) * missing_ratio), replace=False)
-    masks[miss_indices] = False
-    gt_masks = masks.reshape(observed_masks.shape)
-    observed_values = np.nan_to_num(observed_values)
-    observed_masks = observed_masks.astype("float32")
-    gt_masks = gt_masks.astype("float32")
-
-    return observed_values, observed_masks, gt_masks
-
-def mask_missing_train_nrm(data, k_segments=5):
-    observed_values = np.array(data)
-    observed_masks = ~np.isnan(observed_values)
-    gt_masks = observed_masks.copy()
-    length_index = np.array(range(data.shape[0]))
-    list_of_segments_index = np.array_split(length_index, k_segments)
-
-    for channel in range(gt_masks.shape[1]):
-        s_nan = random.choice(list_of_segments_index)
-        gt_masks[:, channel][s_nan[0]:s_nan[-1] + 1] = 0
-
-    observed_values = np.nan_to_num(observed_values)
-    observed_masks = observed_masks.astype("float32")
-    gt_masks = gt_masks.astype("float32")
-
-    return observed_values, observed_masks, gt_masks
-
-def mask_missing_train_bm(data, k_segments=5):
-    observed_values = np.array(data)
-    observed_masks = ~np.isnan(observed_values)
-    gt_masks = observed_masks.copy()
-    length_index = np.array(range(data.shape[0]))
-    list_of_segments_index = np.array_split(length_index, k_segments)
-    s_nan = random.choice(list_of_segments_index)
-
-    for channel in range(gt_masks.shape[1]):
-        gt_masks[:, channel][s_nan[0]:s_nan[-1] + 1] = 0
-
-    observed_values = np.nan_to_num(observed_values)
-    observed_masks = observed_masks.astype("float32")
-    gt_masks = gt_masks.astype("float32")
-
-    return observed_values, observed_masks, gt_masks
-
-def mask_missing_impute(data, mask):
-    # mask to introduce =  0's to impute, 1's to preserve.
-    observed_values = np.array(data)
-    observed_masks = ~np.isnan(observed_values)
-    
-    observed_values = np.nan_to_num(observed_values)
-    observed_masks = observed_masks.astype("float32")
-    mask = mask.astype("float32")
-    gt_masks = observed_masks * mask
-
-    return observed_values, observed_masks, gt_masks
-
-# endregion
-
-# # region ==== Dataset 
-# class Custom_Impute_Dataset(Dataset):
-#     def __init__(self, series, mask, use_index_list=None, path_save=''):
-#         self.series = series
-#         self.n_channels = series.size(2)
-#         self.length = series.size(1)
-#         self.mask = mask 
-
-#         self.observed_values = []
-#         self.observed_masks = []
-#         self.gt_masks = []
-#         path = f"{path_save}data_to_impute_missing" + ".pk"
-
-#         if not os.path.isfile(path):  # if datasetfile is none, create
-#             for sample in series:
-                
-#                 sample = sample.detach().cpu().numpy()
-#                 observed_masks = sample.copy()
-#                 observed_masks[observed_masks!=0] = 1 
-#                 gt_masks = mask
-                
-#                 #observed_values, observed_masks, gt_masks = mask_missing_impute(sample, mask)
-                
-
-                
-#                 self.observed_values.append(sample)
-#                 self.observed_masks.append(observed_masks)
-#                 self.gt_masks.append(gt_masks)
-
-
-#             #tmp_values = self.observed_values.reshape(-1, self.n_channels)
-#             #tmp_masks = self.observed_masks.reshape(-1, self.n_channels)
-#             #mean = np.zeros(self.n_channels)
-#             #std = np.zeros(self.n_channels)
-#             #for k in range(self.n_channels):
-#             #    c_data = tmp_values[:, k][tmp_masks[:, k] == 1]
-#             #    mean[k] = c_data.mean()
-#             #    std[k] = c_data.std()
-#             #self.observed_values = ((self.observed_values - mean) / std * self.observed_masks)
-
-#             #with open(path, "wb") as f:
-#             #   pickle.dump([self.observed_values, self.observed_masks, self.gt_masks], f)
-#         #else:
-#             #with open(path, "rb") as f:
-#                 #self.observed_values, self.observed_masks, self.gt_masks = pickle.load(f)
-        
-#         if use_index_list is None:
-#             self.use_index_list = np.arange(len(self.observed_values))
-#         else:
-#             self.use_index_list = use_index_list
-
-#     def __getitem__(self, org_index):
-#         index = self.use_index_list[org_index]
-#         s = {
-#             "observed_data": self.observed_values[index],
-#             "observed_mask": self.observed_masks[index],
-#             "gt_mask": self.gt_masks[index],
-#             "timepoints": np.arange(self.length),
-#         }
-#         return s
-
-#     def __len__(self):
-#         return len(self.use_index_list)
-
-# def get_dataloader_impute(series, mask, batch_size=4, len_dataset=100):
-#     indlist = np.arange(len_dataset)
-#     impute_dataset = Custom_Impute_Dataset(series=series, use_index_list=indlist,mask=mask)
-#     impute_loader = DataLoader(impute_dataset, batch_size=batch_size, shuffle=False)
-
-#     return impute_loader
-
-## endregion 
-
-
-
-
-    
-
-

@@ -264,3 +264,12 @@ class L2Normalize(tf.keras.layers.Layer):
             square_sum = math_ops.reduce_sum(math_ops.square(x), axis, keepdims=True)
             x_inv_norm = math_ops.rsqrt(math_ops.maximum(square_sum, epsilon))
             return math_ops.multiply(x, x_inv_norm, name=name)
+
+class ScaleLayer(tf.keras.layers.Layer):
+    def __init__(self, shape=(1,) ,dtype=tf.float32):
+      super(ScaleLayer, self).__init__( dtype=dtype)      
+      self.scale = tf.Variable( tf.zeros( shape, dtype=dtype), dtype=dtype)
+
+    def call(self, inputs):
+       out = inputs * tf.math.exp( self.scale * 3 )
+       return out
