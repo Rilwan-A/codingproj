@@ -125,7 +125,6 @@ class CSDIS4(ls.Layer):
         cond_emb = self.get_side_emb( observed_timesteps, cond_mask ) #(B,L,H,emb)
         
         x = tf.reshape(x, (B, inputdim, K*L) )
-        # x = tf.transpose(x, (0,2,1))
         x = self.input_projection( x )
         x = tf.nn.relu(x)
         x = tf.reshape(x, (B, self.channels, K, L) )
@@ -137,7 +136,6 @@ class CSDIS4(ls.Layer):
 
         x = tf.reduce_sum( tf.stack(skip), axis=0) / tf.math.sqrt( tf.cast( len(self.residual_layers), dtype=x.dtype) ) 
             
-
         x = tf.reshape(x, (B, self.channels, K * L) )
         x = self.output_projection1(x)  # (B,channel,K*L)
         x = tf.nn.relu(x)
@@ -152,7 +150,7 @@ class CSDIS4(ls.Layer):
         time_embed = tf.broadcast_to( time_embed[:,:,tf.newaxis, :], (B, L, K, self.emb_time_dim ) )
         
         feature_embed = self.embed_layer(tf.range(self.target_dim))  # (K,emb)
-        feature_embed = tf.broadcast_to( 
+        feature_embed = tf.broadcast_to(
                             feature_embed[tf.newaxis, tf.newaxis, ...],
                             (B, L, *feature_embed.shape) )
 
@@ -167,11 +165,10 @@ class CSDIS4(ls.Layer):
         return side_info
 
     def time_embedding(self, pos, d_model=128):
-        # pe = torch.zeros(pos.shape[0], pos.shape[1], d_model).to(self.device)
+        
         pe = np.zeros( (pos.shape[0], pos.shape[1], d_model) )
         position = pos[:,:, np.newaxis,...]
         
-        # div_term = 1 / torch.pow(10000.0, torch.arange(0, d_model, 2).to(self.device) / d_model)
         div_term = 1 / np.power(10000.0, np.arange(0, d_model, 2) / d_model)
 
         pe[:, :, 0::2] = np.sin(position * div_term)

@@ -77,10 +77,6 @@ class DsetYahooStocks():
         return int( (self.end_prop_val-self.start_prop_val)  * len(self) )
     
     def len_test_unbatched(self):
-        # if self.test_set_method == 'holidays_only':
-        #     raise NotImplementedError
-
-        # else:    
         return int( (self.end_prop_test-self.start_prop_test)  * len(self) )
     
     def get_dset(self, batch_size=64, shuffle_buffer_prop=0, prefetch=True, cache=False, 
@@ -169,7 +165,6 @@ class DsetYahooStocks():
 
             windows = windows.flat_map(sub_to_batch)
             return windows
-
         
         if epochs == 1:
             dset = make_window_dataset(dset, window_size=self.window_size, shift = self.window_shift, stride=1)
@@ -182,7 +177,7 @@ class DsetYahooStocks():
             # window differ for each epoch
             li_dsets = [None]*epochs
             for idx in range(epochs):
-                _ = dset.skip(random.randint(0, self.window_size-1))
+                _ = dset.skip(random.randint(0, self.window_shift-1))
                 dset_window = make_window_dataset(_, window_size=self.window_size, shift = self.window_shift, stride=1)
                 li_dsets[idx] = dset_window
             
@@ -209,8 +204,8 @@ class DsetYahooStocks():
     
     def get_dset_train(self, batch_size, shuffle_buffer_prop=1.0, epochs=1 ):
         
-        s_idx = 0
-        e_idx = int( self.len_train_unbatched()*self.window_shift)
+        s_idx = int( self.start_prop_train * len(self) * self.window_shift ) 
+        e_idx = int( self.end_prop_train *len(self) * self.window_shift ) 
         
         dset_train = self.get_dset(batch_size, shuffle_buffer_prop=shuffle_buffer_prop,
                                    prefetch=True, cache=True, s_idx=s_idx, e_idx=e_idx,
@@ -220,9 +215,10 @@ class DsetYahooStocks():
 
     def get_dset_val(self, batch_size ):
         
-        s_idx = int( self.len_train_unbatched()*self.window_shift)
+        s_idx = int( self.start_prop_val * len(self) * self.window_shift ) 
 
-        e_idx = int(( self.len_train_unbatched() + self.len_val_unbatched() )*self.window_shift)
+        e_idx = int( self.end_prop_val *len(self) * self.window_shift ) 
+        
         dset_val = self.get_dset(batch_size, shuffle_buffer_prop=0, s_idx=s_idx, e_idx=e_idx, cache=True)
         
         return dset_val
@@ -240,17 +236,14 @@ class DsetYahooStocks():
         Returns:
             _type_: _description_
         """
-        #NOTE: change the way lengths are gathered, replace len_{train,val,test} with len_unbatched
+        s_idx = self.start_prop_test if self.start_prop_test is None else int( self.start_prop_test * len(self) * self.window_shift )
+        e_idx = self.end_prop_test if self.end_prop_test is None else int( self.end_prop_test *len(self) * self.window_shift )
+            
         if self.test_set_method == 'holidays_only':
             # Predict for all holidays in whole period
-            # s_idx=None
-            # e_idx=None
-            s_idx = self.start_prop_test if self.start_prop_test is None else int(( self.len_train_unbatched() + self.len_val_unbatched() )*self.window_shift)
-            e_idx = self.end_prop_test if self.end_prop_test is None else int(( self.len_train_unbatched() + self.len_val_unbatched() + self.len_test_unbatched() )*self.window_shift)
             dset_test = self.get_dset_holidays_only(batch_size, indexes_to_include, s_idx=s_idx, e_idx=e_idx )
         else:            
-            s_idx = self.start_prop_test if self.start_prop_test is None else int(( self.len_train_unbatched() + self.len_val_unbatched() )*self.window_shift)
-            e_idx = self.end_prop_test if self.end_prop_test is None else int(( self.len_train_unbatched() + self.len_val_unbatched() + self.len_test_unbatched )*self.window_shift)
+
             dset_test = self.get_dset(batch_size, shuffle_buffer_size=0, s_idx=s_idx, e_idx=e_idx )
         return dset_test
     
@@ -463,8 +456,6 @@ class DsetYahooStocks():
         for k in keys_to_transpose:
             dict_input[k] = np.transpose(dict_input[k], (0,2,1))
 
-        
-        
         dataset = tf.data.Dataset.from_tensor_slices( dict_input )
         
         dataset = dataset.batch(batch_size)
@@ -505,7 +496,7 @@ class DsetYahooStocks():
                
         
         parser.add_argument("--shuffle_buffer_prop", type=float, 
-                            default=0.99,
+                            default=1.0,
                             help='proportion of the dataset to hold in shuffle buffer')
         
         # dataset sizes
@@ -707,8 +698,9 @@ class DsetYahooStocksMaxMin(DsetYahooStocks):
         Returns:
             _type_: _description_
         """
-        s_idx = self.start_prop_test if self.start_prop_test is None else int(( self.len_train_unbatched() + self.len_val_unbatched() )*self.window_shift)
-        e_idx = self.end_prop_test if self.end_prop_test is None else int(( self.len_train_unbatched() + self.len_val_unbatched() + self.len_test_unbatched() )*self.window_shift)
+        s_idx = self.start_prop_test if self.start_prop_test is None else int( self.start_prop_test * len(self) )
+        e_idx = self.end_prop_test if self.end_prop_test is None else int( self.end_prop_test *len(self) )
+        
         dset_test = self.get_dset(batch_size, shuffle_buffer_prop=0, s_idx=s_idx, e_idx=e_idx )
         return dset_test
 
@@ -814,7 +806,7 @@ class Dset_V2():
         parser = argparse.ArgumentParser(parents=[parent_parser], add_help=True, allow_abbrev=False)
 
         # dataset location
-        parser.add_argument("--dir_data", type=str, default='./datasets', )
+        parser.add_argument("--dir_data", type=str, default='./datasets/alvarez', )
         parser.add_argument("--shuffle_buffer_prop", type=float, default=1.0 , help='proportion of the dataset to hold in shuffle buffer')
         parser.add_argument("--batch_size", default=60, type=int)
         parser.add_argument("--batch_size_val", default=None, type=int)

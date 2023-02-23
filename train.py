@@ -8,7 +8,7 @@ import argparse
 from argparse import ArgumentParser
 import tensorflow as tf
 
-# tf.get_logger().setLevel('ERROR')
+tf.get_logger().setLevel('ERROR')
 # tf.config.run_functions_eagerly(True)
 physical_devices = tf.config.list_physical_devices('GPU')
 try:
@@ -159,6 +159,7 @@ class ImputationTrainer(tf.keras.Model):
             cond_mask = None
             loss_mask = None
             target = None
+            other = {}
             
         
         elif type(batch) == dict:
@@ -191,8 +192,6 @@ class ImputationTrainer(tf.keras.Model):
 
         # data pass through
         with tf.GradientTape() if (step_name == 'train') else nullcontext() as tape:
-            
-            
             
             # Forward Step
             epsilon_theta, epsilon = self(audio, cond_mask, eval_all_timesteps=eval_all_timesteps)
@@ -294,7 +293,6 @@ class ImputationTrainer(tf.keras.Model):
             self.model,
             audio.shape,
             observed=(audio * tf.cast(observed_mask,audio.dtype)),
-
             cond_mask=cond_mask,
             pred_samples=self.pred_samples
         ) # (bs, d, seq, pred_sample )
@@ -323,7 +321,7 @@ class ImputationTrainer(tf.keras.Model):
         for k in self.map_mname_predmetric:
             
             if getattr(self.map_mname_predmetric[k], 'update_state_non_masked_input', False ):
-                self.map_mname_predmetric[k].update_state(audio, generated_audio, loss_mask_expanded, scaler=self.scaler, **other )
+                self.map_mname_predmetric[k].update_state(audio, generated_audio, loss_mask_expanded, **other )
             else:
                 audio_expanded_masked = tf.boolean_mask(audio_expanded, loss_mask_expanded )
                 generated_audio_masked = tf.boolean_mask(generated_audio, loss_mask_expanded )
@@ -537,7 +535,7 @@ class ImputationTrainer(tf.keras.Model):
             dset_test,
             workers=config_trainer.workers,
             # steps = 1 if config_trainer.debugging else None, 
-            steps = 10, 
+            # steps = 10, 
             callbacks = callbacks)      
             # use_multiprocessing=False
             # { 'cond_mask': , 'batch':, 'generated_audio':}

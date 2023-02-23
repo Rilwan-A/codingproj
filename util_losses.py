@@ -124,10 +124,8 @@ class MeanRelativeError(tf.keras.metrics.Metric):
             tf.abs(y_true - y_pred), tf.abs(y_true)
         )
         relative_errors = tf.reshape(relative_errors, (-1) )
-
-        # self.li_mre.append(relative_errors)
         
-        batch_sum = tf.reduce_sum(relative_errors)
+        batch_sum = tf.reduce_mean(relative_errors)
         
         self.sum += tf.cast(batch_sum, tf.float64)
         self.count += tf.size(relative_errors, out_type=tf.float64)
@@ -196,12 +194,7 @@ class LogReturnLoss():
         
         # Loss mask for which stocks to calc return on 
         loss_mask_channel = tf.reduce_any(loss_mask, axis=-2) 
-        
-        
-        
-        
-        # target_return = tf.broadcast_to(target_return, (B, C, S) )   
-        
+                
         if 'target_return' in kwargs.keys():
             target_return = kwargs.pop('target_return')
             target_return = tf.tile(target_return, (1, 1, S) )        

@@ -152,7 +152,7 @@ class MaskingMixinCSDI():
             cond_mask = tf.tile( cond_mask[tf.newaxis,...], (shape[0], 1, 1) )
 
         elif mask_method == 'bm':
-            mask = self.get_cond_mask_bm(shape[1:], missing_k)
+            cond_mask = self.get_cond_mask_bm(shape[1:], missing_k)
             # mask = tf.transpose( mask, perm=(1, 0) )
             cond_mask = tf.tile( cond_mask[tf.newaxis,...], (shape[0], 1, 1) )
 
@@ -268,7 +268,7 @@ class MaskingMixinCSDI():
 #endregion
 
 def get_cond_mask_bm_channel(shape, k="0 29 29 103 103 124" ):
-        """Get mask of same segments (black-out missing) across channels based on k,
+    """Get mask of same segments (black-out missing) across channels based on k,
         where k == number of segments. Mask of sample's shape where 0's to be imputed, and 1's to be preserved
         as per ts imputers
         
@@ -278,41 +278,40 @@ def get_cond_mask_bm_channel(shape, k="0 29 29 103 103 124" ):
         
         k = '0 11 12 39 45 50' Defines 3 groups of channels to choose from for masking
             channel1:[0-11], channel2: [12-39], channel3: [40-50] indicating each idx belongs to channel1       
-        """
+    """
 
-        batch, c, seq_len = shape
-        mask = np.ones(shape)
-        # length_index = np.arange(seq_len)
-               
-        # gathering the stop and start indexes for the channel groups that will be masked
-        li_k = list(map(int, k.split(' ')))
-        li_channelgroup_idxs = [ list(range(sidx, eidx)) for sidx, eidx in zip(li_k[::2],li_k[1::2]) ]
-        
-        # Sample channels to mask corresponding to each stock index
-        li_exchange_to_mask = random.choices(li_channelgroup_idxs, k=batch)
-        
-        # Sample lengths of for segments to be masked - sample between 1 and 9 to reflect holidaay lengths
-            # NOTE: minimum sample lenth is 2, since we are evaluating returns so a 1 day holiay is 2 days no return
-        # li_seg_len = [ int(random.triangular(2, 8+1)) for idx in range(batch) ]
-        li_seg_len = random.choices( [2,3,4], weights=[0.81, 0.143, 0.04 ] , k=batch )
-        
-        # starting index for each segment to be masked
-        # NOTE: the max position of seq_len-l-1 ensures that the lastelement in sequence is not a holiday
-            # This allows us to calculate return over a holiday from prices
-        li_seg_sidx = [  random.choice(range(0, seq_len-l-1)) for l in li_seg_len]
-        
-        for batch_idx in range(batch):
-            s_xchng = li_exchange_to_mask[batch_idx][0]
-            e_xchng = li_exchange_to_mask[batch_idx][1]
+    batch, c, seq_len = shape
+    mask = np.ones(shape)
+    # length_index = np.arange(seq_len)
             
-            s_seg = li_seg_sidx[batch_idx]
-            e_seg = s_seg + li_seg_len[batch_idx]            
-            
-            mask[batch_idx,  s_xchng:e_xchng+1, s_seg:e_seg] = 0
+    # gathering the stop and start indexes for the channel groups that will be masked
+    li_k = list(map(int, k.split(' ')))
+    li_channelgroup_idxs = [ list(range(sidx, eidx)) for sidx, eidx in zip(li_k[::2],li_k[1::2]) ]
+    
+    # Sample channels to mask corresponding to each stock index
+    li_exchange_to_mask = random.choices(li_channelgroup_idxs, k=batch)
+    
+    # Sample lengths of for segments to be masked - sample between 1 and 9 to reflect holidaay lengths
+        # NOTE: minimum sample lenth is 2, since we are evaluating returns so a 1 day holiay is 2 days no return
+    # li_seg_len = [ int(random.triangular(2, 8+1)) for idx in range(batch) ]
+    li_seg_len = random.choices( [2,3,4], weights=[0.81, 0.143, 0.04 ] , k=batch )
+    
+    # starting index for each segment to be masked
+    # NOTE: the max position of seq_len-l-1 ensures that the lastelement in sequence is not a holiday
+        # This allows us to calculate return over a holiday from prices
+    li_seg_sidx = [  random.choice(range(0, seq_len-l-1)) for l in li_seg_len]
+    
+    for batch_idx in range(batch):
+        s_xchng = li_exchange_to_mask[batch_idx][0]
+        e_xchng = li_exchange_to_mask[batch_idx][1]
+        
+        s_seg = li_seg_sidx[batch_idx]
+        e_seg = s_seg + li_seg_len[batch_idx]            
+        
+        mask[batch_idx,  s_xchng:e_xchng+1, s_seg:e_seg] = 0
 
-        # mask = np.transpose(mask, (0, 2, 1)) # (batch, channels, seq_len)        
-        
-        return mask
+    # mask = np.transpose(mask, (0, 2, 1)) # (batch, channels, seq_len)        
+    return mask
         
 #region Diffussion
 class DiffusionAlvarez(ls.Layer, MaskingMixinAlvarez):
@@ -594,6 +593,7 @@ class DiffusionCSDI(ls.Layer, MaskingMixinCSDI):
 
             # TODO: fix the eval_all_timesteps logic
         else:
+            
             #Training Loop
             diffusion_steps = tf.experimental.numpy.random.randint(0, self.num_steps, size=(B,))  # randomly sample diffusion steps from 1~T
 
@@ -651,7 +651,6 @@ class DiffusionCSDI(ls.Layer, MaskingMixinCSDI):
                         ) ** 0.5
                 current_sample += noise * sigma
         
-                
         current_sample = einops.rearrange(current_sample, '(b s) ... -> b ... s', s=pred_samples )
 
         return current_sample
